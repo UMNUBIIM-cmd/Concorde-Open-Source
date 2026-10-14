@@ -1,0 +1,19 @@
+{
+  "name": "concorde-server",
+  "version": "1.2.0",
+  "description": "Servidor de sinaliza\u00e7\u00e3o e chat do Concorde (Socket.IO)",
+  "license": "MIT",
+  "private": true,
+  "type": "commonjs",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20 <25"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "check": "node --check index.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.8.1"
+  }
+}

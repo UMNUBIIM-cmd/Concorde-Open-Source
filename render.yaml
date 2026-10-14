@@ -1,0 +1,12 @@
+# Blueprint do Render. Este arquivo fica na raiz do repositório.
+# No Render: New + > Blueprint e selecione o repositório completo.
+services:
+  - type: web
+    name: concorde-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true

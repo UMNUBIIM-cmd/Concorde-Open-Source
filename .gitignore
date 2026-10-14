@@ -1,0 +1,26 @@
+# Dependências
+node_modules/
+app/node_modules/
+server/node_modules/
+
+# Saída de build do app
+app/dist/
+app/release/
+release/*
+!release/README.md
+
+# Variáveis de ambiente locais (NUNCA versione)
+.env
+*.env
+!.env.example
+!server/.env.example
+
+# Logs e temporários
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+
+# Editores
+.vscode/
+.idea/
