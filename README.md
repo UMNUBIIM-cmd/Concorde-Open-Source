@@ -62,25 +62,75 @@ transparente, onde você controla os dados e o servidor.
 
 ## Arquitetura
 
-![Arquitetura](docs/images/arquitetura.png)
+![Arquitetura do Concorde](docs/images/arquitetura-concorde.png)
 
-- **App desktop** (Electron + React): a interface que cada pessoa abre.
-- **Servidor** (Node.js + Socket.IO): faz a **sinalização** das chamadas e guarda
-  o **texto**. É leve e roda no plano gratuito do Render.
+O Concorde tem três peças, cada uma com um papel bem definido:
+
+- **App desktop** (Electron + React): a interface que cada pessoa abre no Windows.
+  Conecta-se a **um servidor por vez** pelo endereço configurado. **Nunca acessa o
+  banco de dados diretamente** — toda leitura/gravação passa pelo servidor.
+- **Servidor** (Node.js + Socket.IO), hospedado no **Render**: faz a **sinalização**
+  das chamadas (WebRTC) e o **chat de texto**, e **lê/grava o estado** (servidores,
+  canais, mensagens, cadastro de membros) no banco de dados.
+- **Banco PostgreSQL** no **Neon**: guarda o estado de forma **durável**, para que
+  os dados sobrevivam a reinícios e hibernações do servidor.
 - **Mídia P2P (WebRTC)**: a voz, o vídeo e a tela vão **direto de pessoa para
-  pessoa**. O servidor nunca recebe a mídia.
+  pessoa**. O servidor e o banco **nunca recebem a mídia**.
 
-> O estado (servidores, canais, mensagens, cadastro de membros) é **mantido em
-> memória** no servidor. Se o servidor reiniciar, esses dados são recriados
-> conforme as pessoas voltam. Veja "Limitações".
+Diagramas complementares: [fluxo de persistência](docs/images/fluxo-persistencia.png)
+· [deploy no Render + Neon](docs/images/deploy-render-neon.png).
 
-## Como usar
+### Persistência e recuperação dos dados
 
-- **Baixar e usar no Windows:** pegue o `Concorde-x.y.z-portable.exe` na página de
-  *Releases* do repositório (quando publicada) — é portátil, não instala nada.
-  Se ainda não houver release, compile você mesmo (abaixo).
-- **Compilar no Windows:** veja **[docs/installation/COMPILAR_NO_WINDOWS.md](docs/installation/COMPILAR_NO_WINDOWS.md)**.
-- **Guia de uso do app:** veja **[docs/GUIA_DE_USO.md](docs/GUIA_DE_USO.md)**.
+Durante o uso, cada alteração (criar canal, enviar mensagem, mudar perfil/ícone)
+atualiza o estado em memória do servidor **e é gravada no PostgreSQL** (como JSONB).
+Quando o servidor **reinicia ou acorda da hibernação**, ele **lê tudo do banco no
+boot** antes de aceitar conexões, e o estado volta — as pessoas reconectam e
+encontram seus servidores, canais e mensagens.
+
+**Reiniciar ≠ hibernar ≠ perder dados** (distinção importante no plano gratuito):
+
+- **Reiniciar o processo** (deploy novo, queda): a memória é zerada, mas os dados
+  são **restaurados do banco** no próximo boot.
+- **Hibernar o serviço** (plano free do Render, após inatividade): o serviço
+  "dorme" e leva alguns segundos para acordar na próxima conexão; ao acordar,
+  **restaura do banco**. É lentidão momentânea, **não** perda de dados.
+- **Perder dados que só existem em memória**: aconteceria **sem banco configurado**.
+  Mesmo com banco, o que é efêmero por natureza (presença online, ocupação dos
+  canais de voz, conexões WebRTC) não é persistido — é recriado quando as pessoas
+  voltam.
+
+> **Status da persistência — leia antes de divulgar:** o código de persistência
+> em PostgreSQL está na branch **`feature/postgres-persistence`** e, até a última
+> verificação, **ainda não foi mesclado em `main`** (a `main` roda apenas em
+> memória). Se o seu servidor no Render já está implantado a partir dessa branch e
+> conectado a um banco Neon, a arquitetura acima descreve o seu servidor. Caso
+> contrário, ele roda em **modo memória** (veja "Limitações"). Confirme de qual
+> branch o Render faz deploy antes de afirmar que a persistência está ativa.
+
+## Baixar e usar (Windows)
+
+**Quer só usar, sem compilar?** Baixe a versão pronta na página de *Releases*:
+
+👉 **[Releases → v1.2.0](https://github.com/UMNUBIIM-cmd/Concorde-Open-Source/releases)** · arquivo **`Concorde-1.2.0-Windows.zip`**
+
+1. Baixe o **`Concorde-1.2.0-Windows.zip`** na release **v1.2.0**.
+2. **Extraia** o ZIP numa pasta.
+3. Abra a pasta **`win-unpacked`** e execute **`Concorde.exe`**.
+4. Na tela de entrada, informe o **endereço do servidor** (o seu, ou o de quem te
+   convidou) e entre com o **código de convite**.
+
+> ⚠️ **Sobre esta versão:** o `Concorde-1.2.0-Windows.zip` é o build **já publicado**
+> na release v1.2.0 — **não** é um pacote recém-gerado nem revalidado nesta rodada
+> de documentação. Confirme que ele corresponde ao código atual antes de tratá-lo
+> como oficial.
+> O executável **não é assinado**, então o Windows pode exibir o aviso do
+> **SmartScreen** ("Windows protegeu o seu PC") na primeira execução — clique em
+> **Mais informações → Executar assim mesmo**. O antivírus também pode sinalizar o
+> capturador de som (`concorde-audio.exe`) que acompanha o app.
+
+**Prefere compilar você mesmo?** Veja **[Compilar no Windows](docs/installation/COMPILAR_NO_WINDOWS.md)**.
+**Guia de uso do app:** **[docs/GUIA_DE_USO.md](docs/GUIA_DE_USO.md)**.
 
 ## Criar o seu servidor (grátis)
 
@@ -108,7 +158,8 @@ Concorde-Open-Source/
 │  └─ images/         capturas e diagrama
 ├─ scripts/        utilitários (ex.: validar configuração)
 ├─ release/        onde o executável é gerado (não versionado)
-├─ .env.example    variáveis de ambiente do servidor (exemplo)
+├─ server/
+│  └─ .env.example  variáveis de ambiente do servidor (exemplo)
 ├─ LICENSE  CONTRIBUTING.md  SECURITY.md  CHECKLIST_PUBLICACAO.md
 ```
 
@@ -123,20 +174,30 @@ Concorde-Open-Source/
     usar a sua.
   - `ICE_SERVERS` — STUN do Google por padrão; adicione um **TURN** se alguém não
     conseguir conectar (ver guia do servidor).
-- **Servidor**: usa só a variável `PORT` (veja `.env.example`). No Render ela é
-  definida automaticamente.
+- **Servidor** (variáveis de ambiente):
+  - `PORT` — porta do servidor (o código usa `process.env.PORT || 3001`). No Render
+    é definida **automaticamente**.
+  - `DATABASE_URL` — string de conexão do PostgreSQL (Neon), usada pela branch com
+    persistência (`feature/postgres-persistence`). Configure-a **nas variáveis de
+    ambiente do Render**, **nunca** no código ou no GitHub. Veja o
+    [guia do servidor](docs/deployment/GUIA_SERVIDOR_PROPRIO_RENDER.md) e
+    `server/.env.example`.
 
 ## Limitações conhecidas
 
 - **Captura de som por aplicativo** (transmitir só o som de um programa) requer
   **Windows 10 versão 2004 (build 19041) ou mais novo**. Em versões anteriores, a
   transmissão vai sem som.
-- **Plano gratuito do Render**: o serviço **hiberna após inatividade** e demora
-  alguns segundos para acordar; não há garantia de disponibilidade contínua; as
-  condições do plano podem mudar.
-- **Estado em memória**: ao reiniciar/hibernar o servidor, servidores/canais/
-  mensagens em memória são recriados conforme as pessoas voltam (não há banco de
-  dados persistente por padrão).
+- **Persistência dos dados**: com a branch de persistência e um banco PostgreSQL
+  (Neon) configurado, servidores/canais/mensagens **sobrevivem** a reinícios e
+  hibernações (são restaurados do banco no boot). **Sem banco configurado** — ou na
+  `main` atual, que roda em memória — esses dados são recriados conforme as pessoas
+  voltam e se perdem ao reiniciar. O que é efêmero por natureza (presença online,
+  ocupação dos canais de voz, conexões WebRTC) nunca é persistido.
+- **Planos gratuitos (Render e Neon)**: podem **hibernar/pausar** após inatividade
+  e levar alguns segundos para responder; **não há garantia de disponibilidade
+  contínua** e as condições dos planos podem mudar. Para algo mais confiável,
+  considere planos pagos (ver guia do servidor).
 - **Trocar a saída de áudio** depende de um Chromium/Windows recente.
 - **Mini player do YouTube**: é "assistir/ouvir junto" sincronizado — o áudio do
   YouTube **não** entra na chamada; cada pessoa ouve no próprio player.
