@@ -4,16 +4,18 @@
  * Servidor do Concorde.
  *
  *  1) Guarda servidores (guilds), canais, mensagens e o cadastro de membros
- *     (quem já entrou), em memória.
+ *     (quem já entrou), em memória e sincronizados com PostgreSQL.
  *  2) Repassa a sinalização WebRTC (offer/answer/ICE) entre as pessoas. Áudio e
  *     vídeo NÃO passam pelo servidor — vão direto de pessoa para pessoa (P2P).
  *  3) Sincroniza o mini player (tocar junto) e repassa o ping.
  *
- * Estado em memória: ao reiniciar (ou o plano grátis "dormir"), tudo se perde.
+ * Com DATABASE_URL configurada, o estado persistente é restaurado no boot.
+ * Presença online e estado de voz são efêmeros e são reconstruídos ao reconectar.
  */
 
 const http = require('http');
 const { Server } = require('socket.io');
+const persistence = require('./persistence');
 
 const PORT = process.env.PORT || 3001;
 const MAX_HISTORY = 100;
@@ -137,6 +139,37 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 6 * 1024 * 1024,
 });
 
+// Carrega os servidores persistidos antes de aceitar conexões.
+async function restoreGuilds() {
+  const rows = await persistence.loadGuilds();
+  for (const row of rows) {
+    const data = row.data;
+    const guild = {
+      id: data.id,
+      code: data.code || row.code,
+      name: data.name || 'Servidor',
+      icon: data.icon || null,
+      channels: Array.isArray(data.channels) ? data.channels : [],
+      messages: data.messages && typeof data.messages === 'object' ? data.messages : {},
+      voice: {},
+      roster: new Map(),
+      player: data.player || null,
+    };
+    for (const member of (Array.isArray(row.roster) ? row.roster : [])) {
+      if (member && typeof member.userId === 'string') {
+        guild.roster.set(member.userId, member);
+      }
+    }
+
+    guilds.set(guild.code, guild);
+  }
+  console.log('Servidores restaurados do PostgreSQL:', guilds.size);
+}
+function persistGuild(guild) {
+  persistence.saveGuild(guild).catch((err) => {
+    console.error('Falha ao salvar servidor no PostgreSQL:', err.message);
+  });
+}
 function emitVoiceState(guild) { io.to(guild.code).emit('voice:state', voiceState(guild)); }
 function emitMembers(guild) { io.to(guild.code).emit('members', guildMembers(guild)); }
 
@@ -166,6 +199,7 @@ io.on('connection', (socket) => {
   function enterGuild(guild, userId, nick, avatar) {
     const r = { userId, nick, avatar: avatar || (guild.roster.get(userId) || {}).avatar || null };
     guild.roster.set(userId, r);
+    persistGuild(guild);
     const m = { socketId: socket.id, userId, nick, code: guild.code, voiceChannel: null, media: emptyMedia() };
     members.set(socket.id, m);
     socket.join(guild.code);
@@ -211,11 +245,12 @@ io.on('connection', (socket) => {
     if (nick != null) { r.nick = cleanNick(nick); me.nick = r.nick; }
     if (avatar !== undefined) r.avatar = cleanImage(avatar, MAX_AVATAR); // null limpa
     guild.roster.set(me.userId, r);
+    persistGuild(guild);
     // Atualiza o apelido/foto em todos os outros servidores abertos pelo mesmo userId.
     for (const g of guilds.values()) {
       if (g === guild) continue;
       const rr = g.roster.get(me.userId);
-      if (rr) { if (nick != null) rr.nick = r.nick; if (avatar !== undefined) rr.avatar = r.avatar; emitMembers(g); emitVoiceState(g); }
+      if (rr) { if (nick != null) rr.nick = r.nick; if (avatar !== undefined) rr.avatar = r.avatar; persistGuild(g); emitMembers(g); emitVoiceState(g); }
     }
     emitMembers(guild);
     emitVoiceState(guild);
@@ -228,6 +263,7 @@ io.on('connection', (socket) => {
     if (!guild) return reply(ack, { ok: false, error: 'Você não está em um servidor.' });
     if (name != null) { const n = (name || '').toString().trim().slice(0, 60); if (n) guild.name = n; }
     if (icon !== undefined) guild.icon = cleanImage(icon, MAX_AVATAR);
+    persistGuild(guild);
     io.to(guild.code).emit('guild:info', { code: guild.code, name: guild.name, icon: guild.icon });
     reply(ack, { ok: true, name: guild.name, icon: guild.icon });
   });
@@ -242,6 +278,7 @@ io.on('connection', (socket) => {
     if (!clean) return reply(ack, { ok: false, error: 'Dê um nome ao canal.' });
     const channel = { id: makeId(type === 'text' ? 'c' : 'v'), name: clean, type };
     guild.channels.push(channel);
+    persistGuild(guild);
     io.to(guild.code).emit('channels', guild.channels);
     emitVoiceState(guild);
     reply(ack, { ok: true, channel });
@@ -255,6 +292,7 @@ io.on('connection', (socket) => {
     const clean = cleanChannelName(name, channel.type);
     if (!clean) return reply(ack, { ok: false, error: 'Dê um nome ao canal.' });
     channel.name = clean;
+    persistGuild(guild);
     io.to(guild.code).emit('channels', guild.channels);
     reply(ack, { ok: true, channel });
   });
@@ -280,6 +318,7 @@ io.on('connection', (socket) => {
     }
     guild.channels = guild.channels.filter((c) => c.id !== channelId);
     delete guild.messages[channelId];
+    persistGuild(guild);
     io.to(guild.code).emit('channels', guild.channels);
     emitVoiceState(guild);
     reply(ack, { ok: true });
@@ -305,6 +344,7 @@ io.on('connection', (socket) => {
     const arr = guild.messages[channelId] || (guild.messages[channelId] = []);
     arr.push(msg);
     if (arr.length > MAX_HISTORY) arr.splice(0, arr.length - MAX_HISTORY);
+    persistGuild(guild);
     io.to(me.code).emit('message:new', msg);
   });
 
@@ -350,6 +390,7 @@ io.on('connection', (socket) => {
     if (!guild) return;
     if (!/^[A-Za-z0-9_-]{11}$/.test(videoId || '')) return;
     guild.player = { videoId, title: (title || '').toString().slice(0, 120), playing: true, time: 0, at: Date.now() };
+    persistGuild(guild);
     io.to(guild.code).emit('player:state', guild.player);
   });
   socket.on('player:control', ({ action, time } = {}) => {
@@ -361,6 +402,7 @@ io.on('connection', (socket) => {
     else if (action === 'seek') { p.time = Math.max(0, +time || 0); p.at = Date.now(); }
     else if (action === 'stop') { guild.player = null; }
     else return;
+    persistGuild(guild);
     io.to(guild.code).emit('player:state', guild.player);
   });
 
@@ -375,11 +417,15 @@ io.on('connection', (socket) => {
     leaveVoice();
     members.delete(socket.id);
     if (guild) emitMembers(guild);
-    setTimeout(() => {
-      const g = guilds.get(code);
-      if (g && onlineUserIds(code).size === 0) guilds.delete(code);
-    }, 5 * 60 * 1000);
+
   });
 });
 
-httpServer.listen(PORT, () => console.log('Concorde server ouvindo na porta ' + PORT));
+restoreGuilds()
+  .then(() => {
+    httpServer.listen(PORT, () => console.log('Concorde server ouvindo na porta ' + PORT));
+  })
+  .catch((err) => {
+    console.error('Falha ao restaurar servidores do PostgreSQL:', err.message);
+    process.exit(1);
+  });
