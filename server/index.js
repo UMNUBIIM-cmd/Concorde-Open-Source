@@ -4,12 +4,13 @@
  * Servidor do Concorde.
  *
  *  1) Guarda servidores (guilds), canais, mensagens e o cadastro de membros
- *     (quem já entrou), em memória.
+ *     (quem já entrou), em memória e sincronizados com PostgreSQL.
  *  2) Repassa a sinalização WebRTC (offer/answer/ICE) entre as pessoas. Áudio e
  *     vídeo NÃO passam pelo servidor — vão direto de pessoa para pessoa (P2P).
  *  3) Sincroniza o mini player (tocar junto) e repassa o ping.
  *
- * Estado em memória: ao reiniciar (ou o plano grátis "dormir"), tudo se perde.
+ * Com DATABASE_URL configurada, o estado persistente é restaurado no boot.
+ * Presença online e estado de voz são efêmeros e são reconstruídos ao reconectar.
  */
 
 const http = require('http');
@@ -342,8 +343,8 @@ io.on('connection', (socket) => {
     };
     const arr = guild.messages[channelId] || (guild.messages[channelId] = []);
     arr.push(msg);
-    persistGuild(guild);
     if (arr.length > MAX_HISTORY) arr.splice(0, arr.length - MAX_HISTORY);
+    persistGuild(guild);
     io.to(me.code).emit('message:new', msg);
   });
 

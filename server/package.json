@@ -11,7 +11,8 @@
   },
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js"
+    "check": "node --check index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "pg": "^8.23.1",
