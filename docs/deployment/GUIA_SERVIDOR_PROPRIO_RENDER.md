@@ -24,10 +24,11 @@ Para ser transparente (e não afirmar nada sem evidência):
   implementada na branch **`feature/postgres-persistence`** — o servidor cria as
   tabelas, grava a cada alteração e restaura tudo no boot. Veja `server/index.js`
   e `server/persistence.js` **nessa branch**.
-- **Ainda não mesclado:** na última verificação, essa branch **não estava mesclada
-  em `main`**. A `main` roda **apenas em memória** (sem `pg`). Para ter
-  persistência no Render, faça o deploy **a partir da branch de persistência** (ou
-  mescle-a antes) e configure a `DATABASE_URL`.
+- **Persistência no deploy:** o serviço precisa executar um commit que inclua
+  `server/persistence.js`, a dependência `pg` e as alterações correspondentes em
+  `server/index.js`, além de ter uma `DATABASE_URL` válida no ambiente. Confirme
+  a branch e o commit implantados no Render antes de concluir que a persistência
+  está ativa.
 - **Precisa da sua validação:** se **você** já criou o banco no Neon, conectou o
   Render e confirmou a recuperação após reinício, esses passos estão **feitos no
   seu ambiente** — mas **não foram verificados por este guia**. Onde um passo
@@ -132,11 +133,10 @@ Para o Render acessar o código, ele precisa estar no GitHub.
 6. O `.gitignore` já exclui `.env` e `node_modules`. **Não** adicione a
    `DATABASE_URL` nem nenhuma senha ao repositório.
 
-> **Importante (branch):** a persistência está na branch
-> **`feature/postgres-persistence`**. Garanta que essa branch exista no seu
-> repositório no GitHub — é ela que você vai selecionar no Render. Se preferir usar
-> a `main`, mescle a branch de persistência nela **antes** (decisão sua; veja a
-> nota de status no topo).
+> **Importante (branch):** selecione no Render a branch que contém a implementação
+> de persistência PostgreSQL e configure a `DATABASE_URL`. Mesclar um Pull Request
+> não troca automaticamente a branch/commit já selecionada no serviço; confirme
+> a origem do deploy nas configurações do Render antes de alterar o ambiente.
 
 ---
 

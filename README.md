@@ -100,14 +100,10 @@ encontram seus servidores, canais e mensagens.
   canais de voz, conexões WebRTC) não é persistido — é recriado quando as pessoas
   voltam.
 
-> **Status da persistência — leia antes de divulgar:** o código de persistência
-> em PostgreSQL está na branch **`feature/postgres-persistence`** e, até a última
-> verificação, **ainda não foi mesclado em `main`** (a `main` roda apenas em
-> memória). Se o seu servidor no Render já está implantado a partir dessa branch e
-> conectado a um banco Neon, a arquitetura acima descreve o seu servidor. Caso
-> contrário, ele roda em **modo memória** (veja "Limitações"). Confirme de qual
-> branch o Render faz deploy antes de afirmar que a persistência está ativa.
-
+> **Importante:** a persistência só fica ativa quando o servidor implantado inclui
+> a implementação PostgreSQL (`server/persistence.js` e a dependência `pg`)
+> e tem uma `DATABASE_URL` válida configurada no ambiente. Confirme a branch
+> implantada no Render e a variável antes de afirmar que a persistência está ativa.
 ## Baixar e usar (Windows)
 
 **Quer só usar, sem compilar?** Baixe a versão pronta na página de *Releases*:
@@ -188,12 +184,11 @@ Concorde-Open-Source/
 - **Captura de som por aplicativo** (transmitir só o som de um programa) requer
   **Windows 10 versão 2004 (build 19041) ou mais novo**. Em versões anteriores, a
   transmissão vai sem som.
-- **Persistência dos dados**: com a branch de persistência e um banco PostgreSQL
-  (Neon) configurado, servidores/canais/mensagens **sobrevivem** a reinícios e
-  hibernações (são restaurados do banco no boot). **Sem banco configurado** — ou na
-  `main` atual, que roda em memória — esses dados são recriados conforme as pessoas
-  voltam e se perdem ao reiniciar. O que é efêmero por natureza (presença online,
-  ocupação dos canais de voz, conexões WebRTC) nunca é persistido.
+- **Persistência dos dados**: servidores, canais e mensagens sobrevivem a reinícios
+  e hibernações quando o servidor implantado inclui a implementação PostgreSQL
+  e tem `DATABASE_URL` válida. Sem esses requisitos, a persistência não está ativa.
+  Presença online, ocupação dos canais de voz e conexões WebRTC são efêmeras e
+  não são persistidas.
 - **Planos gratuitos (Render e Neon)**: podem **hibernar/pausar** após inatividade
   e levar alguns segundos para responder; **não há garantia de disponibilidade
   contínua** e as condições dos planos podem mudar. Para algo mais confiável,
